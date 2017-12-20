@@ -4,31 +4,31 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
-import android.support.v7.widget.Toolbar;
-import android.util.Log;
-import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
+import android.widget.RelativeLayout;
 
 import com.jcodecraeer.xrecyclerview.ProgressStyle;
 import com.jcodecraeer.xrecyclerview.XRecyclerView;
 
 import java.util.ArrayList;
 
-public class LinearActivity extends AppCompatActivity {
+/**
+ * Created by LinGuanHong on 2017/3/30.
+ */
+
+public class AlphaChangeActivity extends AppCompatActivity {
+
     private XRecyclerView mRecyclerView;
     private MyAdapter mAdapter;
     private ArrayList<String> listData;
     private int refreshTime = 0;
     private int times = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_recyclerview);
-        final Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        setContentView(R.layout.alpha_change_layout);
 
         mRecyclerView = (XRecyclerView)this.findViewById(R.id.recyclerview);
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
@@ -39,36 +39,33 @@ public class LinearActivity extends AppCompatActivity {
         mRecyclerView.setLoadingMoreProgressStyle(ProgressStyle.BallRotate);
         mRecyclerView.setArrowImageView(R.drawable.iconfont_downgrey);
 
-        View header = LayoutInflater.from(this).inflate(R.layout.recyclerview_header, (ViewGroup)findViewById(android.R.id.content),false);
-        mRecyclerView.addHeaderView(header);
+        /** ----- alpha change listen test start ----- */
+        final RelativeLayout alpha_title
+                = (RelativeLayout) findViewById(R.id.alpha_title);
+        findViewById(R.id.back).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                finish();
+            }
+        });
+        findViewById(R.id.back_to_top).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                mRecyclerView.scrollToPosition(0);
+            }
+        });
+        mRecyclerView.setScrollAlphaChangeListener(new XRecyclerView.ScrollAlphaChangeListener() {
+            @Override
+            public void onAlphaChange(int alpha) {
+                alpha_title.getBackground().setAlpha(alpha);
+            }
 
-        mRecyclerView.getDefaultFootView().setLoadingHint("自定义加载中提示");
-        mRecyclerView.getDefaultFootView().setNoMoreHint("自定义加载完毕提示");
-
-        // if you use setFooterView,the default footerView will unUseful
-//        TextView tv = new TextView(this);
-//        tv.setText("自定义 footer");
-//        mRecyclerView.setFootView(tv, new CustomFooterViewCallBack() {
-//            @Override
-//            public void onLoadingMore(View yourFooterView) {
-//
-//            }
-//
-//            @Override
-//            public void onLoadMoreComplete(View yourFooterView) {
-//
-//            }
-//
-//            @Override
-//            public void onSetNoMore(View yourFooterView, boolean noMore) {
-//
-//            }
-//        });
-
-        final int itemLimit = 5;
-
-        // When the item number of the screen number is list.size-2,we call the onLoadMore
-        mRecyclerView.setLimitNumberToCallLoadMore(2);
+            @Override
+            public int setLimitHeight() {
+                return 1300;
+            }
+        });
+        /** ------ alpha change listen test end ----- */
 
         mRecyclerView.setLoadingListener(new XRecyclerView.LoadingListener() {
             @Override
@@ -78,7 +75,7 @@ public class LinearActivity extends AppCompatActivity {
                 new Handler().postDelayed(new Runnable(){
                     public void run() {
                         listData.clear();
-                        for(int i = 0; i < itemLimit ;i++){
+                        for(int i = 0; i < 15 ;i++){
                             listData.add("item" + i + "after " + refreshTime + " times of refresh");
                         }
                         mAdapter.notifyDataSetChanged();
@@ -90,11 +87,10 @@ public class LinearActivity extends AppCompatActivity {
 
             @Override
             public void onLoadMore() {
-                Log.e("aaaaa","call onLoadMore");
                 if(times < 2){
                     new Handler().postDelayed(new Runnable(){
                         public void run() {
-                            for(int i = 0; i < itemLimit ;i++){
+                            for(int i = 0; i < 15 ;i++){
                                 listData.add("item" + (1 + listData.size() ) );
                             }
                             mRecyclerView.loadMoreComplete();
@@ -104,7 +100,7 @@ public class LinearActivity extends AppCompatActivity {
                 } else {
                     new Handler().postDelayed(new Runnable() {
                         public void run() {
-                            for(int i = 0; i < itemLimit ;i++){
+                            for(int i = 0; i < 9 ;i++){
                                 listData.add("item" + (1 + listData.size() ) );
                             }
                             mRecyclerView.setNoMore(true);
@@ -118,16 +114,6 @@ public class LinearActivity extends AppCompatActivity {
 
         listData = new  ArrayList<String>();
         mAdapter = new MyAdapter(listData);
-        mAdapter.setClickCallBack(
-                new MyAdapter.ItemClickCallBack() {
-                    @Override
-                    public void onItemClick(int pos) {
-                        // a demo for notifyItemRemoved
-                        listData.remove(pos);
-                        mRecyclerView.notifyItemRemoved(listData,pos);
-                    }
-                }
-        );
         mRecyclerView.setAdapter(mAdapter);
         mRecyclerView.refresh();
     }
@@ -142,13 +128,3 @@ public class LinearActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 }
-
-
-
-
-
-
-
-
-
-

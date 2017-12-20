@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.NonNull;
 import android.support.design.widget.AppBarLayout;
 import android.support.design.widget.CoordinatorLayout;
 import android.support.v7.widget.GridLayoutManager;
@@ -11,12 +12,10 @@ import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.StaggeredGridLayoutManager;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-import android.widget.ScrollView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +29,7 @@ public class XRecyclerView extends RecyclerView {
     private WrapAdapter mWrapAdapter;
     private float mLastY = -1;
     private static final float DRAG_RATE = 3;
+    private CustomFooterViewCallBack footerViewCallBack;
     private LoadingListener mLoadingListener;
     private ArrowRefreshHeader mRefreshHeader;
     private boolean pullRefreshEnabled = true;
@@ -45,6 +45,11 @@ public class XRecyclerView extends RecyclerView {
     private View mFootView;
     private final RecyclerView.AdapterDataObserver mDataObserver = new DataObserver();
     private AppBarStateChangeListener.State appbarState = AppBarStateChangeListener.State.EXPANDED;
+
+    // limit number to call load more
+    // 控制多出多少条的时候调用 onLoadMore
+    private int limitNumberToCallLoadMore = 1;
+
     public XRecyclerView(Context context) {
         this(context, null);
     }
@@ -67,6 +72,25 @@ public class XRecyclerView extends RecyclerView {
         footView.setProgressStyle(mLoadingMoreProgressStyle);
         mFootView = footView;
         mFootView.setVisibility(GONE);
+    }
+
+    public LoadingMoreFooter getDefaultFootView(){
+        if(mFootView == null){
+            return null;
+        }
+        if(mFootView instanceof LoadingMoreFooter){
+            return ((LoadingMoreFooter) mFootView);
+        }
+        return null;
+    }
+
+    // set the number to control call load more,see the demo on linearActivity
+    public void setLimitNumberToCallLoadMore(int limitNumberToCallLoadMore) {
+        this.limitNumberToCallLoadMore = limitNumberToCallLoadMore;
+    }
+
+    public View getFootView(){
+        return mFootView;
     }
 
     public void setFootViewText(String loading, String noMore) {
@@ -106,8 +130,13 @@ public class XRecyclerView extends RecyclerView {
         }
     }
 
-    public void setFootView(final View view) {
+    @SuppressWarnings("all")
+    public void setFootView(@NonNull final View view,@NonNull CustomFooterViewCallBack footerViewCallBack) {
+        if(view == null || footerViewCallBack == null){
+            return;
+        }
         mFootView = view;
+        this.footerViewCallBack = footerViewCallBack;
     }
 
     public void loadMoreComplete() {
@@ -115,7 +144,9 @@ public class XRecyclerView extends RecyclerView {
         if (mFootView instanceof LoadingMoreFooter) {
             ((LoadingMoreFooter) mFootView).setState(LoadingMoreFooter.STATE_COMPLETE);
         } else {
-            mFootView.setVisibility(View.GONE);
+            if(footerViewCallBack != null){
+                footerViewCallBack.onLoadMoreComplete(mFootView);
+            }
         }
     }
 
@@ -125,7 +156,9 @@ public class XRecyclerView extends RecyclerView {
         if (mFootView instanceof LoadingMoreFooter) {
             ((LoadingMoreFooter) mFootView).setState(isNoMore ? LoadingMoreFooter.STATE_NOMORE:LoadingMoreFooter.STATE_COMPLETE);
         } else {
-            mFootView.setVisibility(View.GONE);
+            if(footerViewCallBack != null){
+                footerViewCallBack.onSetNoMore(mFootView,noMore);
+            }
         }
     }
     public void refresh() {
@@ -221,10 +254,53 @@ public class XRecyclerView extends RecyclerView {
                                 ? gridManager.getSpanCount() : 1;
                     }
                 });
-
             }
         }
     }
+
+    /** ===================== try to adjust the position for XR when you call those functions below ====================== */
+    // which cause "Called attach on a child which is not detached" exception info.
+    // {reason analyze @link:http://www.cnblogs.com/linguanh/p/5348510.html}
+    // by lgh on 2017-11-13 23:55
+
+    // example: listData.remove(position); You can also see a demo on LinearActivity
+    public<T> void notifyItemRemoved(List<T> listData,int position) {
+        if(mWrapAdapter.adapter == null)
+            return;
+        int adjPos = position + getHeaders_includingRefreshCount();
+        mWrapAdapter.adapter.notifyItemRemoved(adjPos);
+        if(adjPos != listData.size()){
+            // call this just for the reset the position for the list data
+            mWrapAdapter.adapter.notifyItemRangeChanged(adjPos, listData.size() - adjPos,new Object());
+        }
+    }
+
+    public void notifyItemInserted(int position) {
+        if(mWrapAdapter.adapter == null)
+            return;
+        int adjPos = position + getHeaders_includingRefreshCount();
+        mWrapAdapter.adapter.notifyItemInserted(adjPos);
+    }
+
+    public void notifyItemChanged(int position) {
+        if(mWrapAdapter.adapter == null)
+            return;
+        int adjPos = position + getHeaders_includingRefreshCount();
+        mWrapAdapter.adapter.notifyItemChanged(adjPos);
+    }
+
+    public void notifyItemChanged(int position,Object o) {
+        if(mWrapAdapter.adapter == null)
+            return;
+        int adjPos = position + getHeaders_includingRefreshCount();
+        mWrapAdapter.adapter.notifyItemChanged(adjPos,o);
+    }
+
+    private int getHeaders_includingRefreshCount(){
+        return mWrapAdapter.getHeadersCount()+1;
+    }
+
+    /** ======================================================= end ======================================================= */
 
     @Override
     public void onScrollStateChanged(int state) {
@@ -241,13 +317,23 @@ public class XRecyclerView extends RecyclerView {
             } else {
                 lastVisibleItemPosition = ((LinearLayoutManager) layoutManager).findLastVisibleItemPosition();
             }
-            if (layoutManager.getChildCount() > 0
-                    && lastVisibleItemPosition >= layoutManager.getItemCount() - 1 && layoutManager.getItemCount() > layoutManager.getChildCount() && !isNoMore && mRefreshHeader.getState() < ArrowRefreshHeader.STATE_REFRESHING) {
+            int adjAdapterItemCount = layoutManager.getItemCount()+getHeaders_includingRefreshCount();
+
+            if (
+                    layoutManager.getChildCount() > 0
+                    && lastVisibleItemPosition >= adjAdapterItemCount - limitNumberToCallLoadMore
+                    && adjAdapterItemCount >= layoutManager.getChildCount()
+                    && !isNoMore
+                    && mRefreshHeader.getState() < ArrowRefreshHeader.STATE_REFRESHING
+            )
+            {
                 isLoadingData = true;
                 if (mFootView instanceof LoadingMoreFooter) {
                     ((LoadingMoreFooter) mFootView).setState(LoadingMoreFooter.STATE_LOADING);
                 } else {
-                    mFootView.setVisibility(View.VISIBLE);
+                    if(footerViewCallBack != null){
+                        footerViewCallBack.onLoadingMore(mFootView);
+                    }
                 }
                 mLoadingListener.onLoadMore();
             }
@@ -411,12 +497,14 @@ public class XRecyclerView extends RecyclerView {
                 }
             }
         }
+
         // some times we need to override this
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position,List<Object> payloads) {
             if (isHeader(position) || isRefreshHeader(position)) {
                 return;
             }
+
             int adjPosition = position - (getHeadersCount() + 1);
             int adapterCount;
             if (adapter != null) {
@@ -434,18 +522,11 @@ public class XRecyclerView extends RecyclerView {
 
         @Override
         public int getItemCount() {
-            if(loadingMoreEnabled) {
-                if (adapter != null) {
-                    return getHeadersCount() + adapter.getItemCount() + 2;
-                } else {
-                    return getHeadersCount() + 2;
-                }
-            }else {
-                if (adapter != null) {
-                    return getHeadersCount() + adapter.getItemCount() + 1;
-                } else {
-                    return getHeadersCount() + 1;
-                }
+            int adjLen = (loadingMoreEnabled?2:1);
+            if (adapter != null) {
+                return getHeadersCount() + adapter.getItemCount() + adjLen;
+            } else {
+                return getHeadersCount() + adjLen;
             }
         }
 
@@ -707,5 +788,47 @@ public class XRecyclerView extends RecyclerView {
                 mDivider.draw(canvas);
             }
         }
+    }
+
+    /** add by LinGuanHong below */
+    private int scrollDyCounter = 0;
+
+    @Override
+    public void scrollToPosition(int position) {
+        super.scrollToPosition(position);
+        /** if we scroll to position 0, the scrollDyCounter should be reset */
+        if(position == 0){
+            scrollDyCounter = 0;
+        }
+    }
+
+    @Override
+    public void onScrolled(int dx, int dy) {
+        super.onScrolled(dx, dy);
+        if(scrollAlphaChangeListener == null){
+            return;
+        }
+        int height = scrollAlphaChangeListener.setLimitHeight();
+        scrollDyCounter = scrollDyCounter + dy;
+        if (scrollDyCounter <= 0) {
+            scrollAlphaChangeListener.onAlphaChange(0);
+        }else if(scrollDyCounter <= height && scrollDyCounter > 0){
+            float scale = (float) scrollDyCounter / height; /** 255/height = x/255 */
+            float alpha = (255 * scale);
+            scrollAlphaChangeListener.onAlphaChange((int) alpha);
+        }else {
+            scrollAlphaChangeListener.onAlphaChange(255);
+        }
+    }
+
+    private ScrollAlphaChangeListener scrollAlphaChangeListener;
+    public void setScrollAlphaChangeListener(
+            ScrollAlphaChangeListener scrollAlphaChangeListener
+    ){
+        this.scrollAlphaChangeListener = scrollAlphaChangeListener;
+    }
+    public interface ScrollAlphaChangeListener{
+        void onAlphaChange(int alpha);  /** you can handle the alpha insert it */
+        int setLimitHeight(); /** set a height for the begging of the alpha start to change */
     }
 }
